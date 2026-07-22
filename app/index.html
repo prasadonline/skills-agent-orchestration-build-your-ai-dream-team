@@ -17,6 +17,42 @@
 
       <section aria-labelledby="projects-heading">
         <h2 id="projects-heading" class="label">Projects</h2>
+        <form class="projects-controls" aria-label="Project filters" onsubmit="return false;">
+          <div class="control-group">
+            <label for="project-search" class="control-label">Search</label>
+            <input
+              id="project-search"
+              class="control-input"
+              type="search"
+              placeholder="Search by name, owner, or activity"
+              autocomplete="off"
+            />
+          </div>
+          <div class="control-group">
+            <label for="status-filter" class="control-label">Status</label>
+            <select id="status-filter" class="control-select">
+              <option value="all">All statuses</option>
+              <option value="on-track">On track</option>
+              <option value="at-risk">At risk</option>
+              <option value="off-track">Off track</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </div>
+          <div class="control-group">
+            <label for="priority-filter" class="control-label">Priority</label>
+            <select id="priority-filter" class="control-select">
+              <option value="all">All priorities</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </div>
+          <div class="control-group control-group-reset">
+            <button id="reset-filters" class="reset-button" type="button">Reset</button>
+          </div>
+        </form>
+        <p id="results-summary" class="results-summary" aria-live="polite"></p>
         <div id="projects-container" class="projects-grid" role="list" aria-live="polite" aria-busy="true"></div>
       </section>
     </main>
@@ -26,16 +62,52 @@
     </noscript>
 
     <script>
-      const STATUS_CLASS_MAP = {
+      const STATUS_CANONICAL = ["on-track", "at-risk", "off-track", "unknown"];
+      const PRIORITY_CANONICAL = ["high", "medium", "low", "unknown"];
+
+      const STATUS_SYNONYMS = {
+        "on-track": "on-track",
         "on track": "on-track",
+        ontrack: "on-track",
+        healthy: "on-track",
+        green: "on-track",
+        stable: "on-track",
+        "at-risk": "at-risk",
         "at risk": "at-risk",
-        "off track": "off-track"
+        atrisk: "at-risk",
+        risk: "at-risk",
+        warning: "at-risk",
+        "needs review": "at-risk",
+        "off-track": "off-track",
+        "off track": "off-track",
+        offtrack: "off-track",
+        blocked: "off-track",
+        red: "off-track",
+        delayed: "off-track"
       };
 
-      const PRIORITY_CLASS_MAP = {
+      const PRIORITY_SYNONYMS = {
         high: "high",
+        critical: "high",
+        urgent: "high",
+        p0: "high",
+        p1: "high",
         medium: "medium",
-        low: "low"
+        moderate: "medium",
+        normal: "medium",
+        p2: "medium",
+        low: "low",
+        minor: "low",
+        backlog: "low",
+        p3: "low"
+      };
+
+      const state = {
+        projects: [],
+        searchTerm: "",
+        statusFilter: "all",
+        priorityFilter: "all",
+        loadError: false
       };
 
       function toDisplayText(value, fallback) {
@@ -54,28 +126,63 @@
           .trim();
       }
 
-      function createBadge(kind, value) {
-        const displayValue = toDisplayText(value, "Unknown");
-        const token = normalizeToken(displayValue);
+      function canonicalizeStatus(value) {
+        const token = normalizeToken(value);
+        return STATUS_SYNONYMS[token] || "unknown";
+      }
+
+      function canonicalizePriority(value) {
+        const token = normalizeToken(value);
+        return PRIORITY_SYNONYMS[token] || "unknown";
+      }
+
+      function toLabel(token) {
+        return token
+          .split("-")
+          .map(function (segment) {
+            return segment.charAt(0).toUpperCase() + segment.slice(1);
+          })
+          .join(" ");
+      }
+
+      function normalizeProject(project) {
+        return {
+          name: toDisplayText(project && project.name, "Untitled Project"),
+          owner: toDisplayText(project && project.owner, "Unassigned"),
+          recentActivity: toDisplayText(
+            project && project.recentActivity,
+            "No recent activity reported."
+          ),
+          rawStatus: toDisplayText(project && project.status, "Unknown"),
+          rawPriority: toDisplayText(project && project.priority, "Unknown"),
+          status: canonicalizeStatus(project && project.status),
+          priority: canonicalizePriority(project && project.priority)
+        };
+      }
+
+      function createBadge(kind, normalizedToken, displayValue) {
+        const safeToken =
+          kind === "status"
+            ? STATUS_CANONICAL.includes(normalizedToken)
+              ? normalizedToken
+              : "unknown"
+            : PRIORITY_CANONICAL.includes(normalizedToken)
+              ? normalizedToken
+              : "unknown";
+
         const badge = document.createElement("span");
 
         badge.classList.add("badge");
-        badge.textContent = displayValue;
+        badge.textContent = displayValue || toLabel(safeToken);
 
         if (kind === "status") {
-          const normalized = STATUS_CLASS_MAP[token];
-          if (normalized) {
-            badge.classList.add("status", "status--" + normalized);
-          }
-          badge.setAttribute("aria-label", "Status: " + displayValue);
+          badge.classList.add("status", "status--" + safeToken);
+          badge.setAttribute("aria-label", "Status: " + badge.textContent);
         }
 
         if (kind === "priority") {
-          const normalized = PRIORITY_CLASS_MAP[token];
-          if (normalized) {
-            badge.classList.add("priority", "priority--" + normalized);
-          }
-          badge.setAttribute("aria-label", "Priority: " + displayValue);
+          badge.classList.add("priority", "priority--" + safeToken);
+          badge.setAttribute("aria-label", "Priority: " + badge.textContent);
         }
 
         return badge;
@@ -95,16 +202,14 @@
 
         const owner = document.createElement("p");
         owner.className = "value";
-        owner.textContent = "Owner: " + toDisplayText(project.owner, "Unassigned");
+        owner.textContent = "Owner: " + project.owner;
 
         const recentActivity = document.createElement("p");
         recentActivity.className = "recent-activity";
-        recentActivity.textContent =
-          "Recent Activity: " +
-          toDisplayText(project.recentActivity, "No recent activity reported.");
+        recentActivity.textContent = "Recent Activity: " + project.recentActivity;
 
-        meta.appendChild(createBadge("status", project.status));
-        meta.appendChild(createBadge("priority", project.priority));
+        meta.appendChild(createBadge("status", project.status, project.rawStatus));
+        meta.appendChild(createBadge("priority", project.priority, project.rawPriority));
 
         card.appendChild(name);
         card.appendChild(meta);
@@ -114,10 +219,152 @@
         return card;
       }
 
-      async function renderProjects() {
+      function updateSummaryText(visibleCount, totalCount) {
+        const summary = document.getElementById("results-summary");
+        summary.textContent = "Showing " + visibleCount + " of " + totalCount + " projects";
+      }
+
+      function setStateMessage(options) {
         const container = document.getElementById("projects-container");
         container.textContent = "";
-        container.setAttribute("aria-busy", "true");
+
+        const message = document.createElement("div");
+        message.className = "state-message " + options.kind;
+        message.setAttribute("role", options.isError ? "alert" : "status");
+        message.textContent = options.message;
+        container.appendChild(message);
+
+        if (options.showRetry) {
+          const retryButton = document.createElement("button");
+          retryButton.type = "button";
+          retryButton.className = "retry-button";
+          retryButton.id = "retry-load";
+          retryButton.textContent = "Retry";
+          retryButton.addEventListener("click", loadProjects);
+          container.appendChild(retryButton);
+        }
+      }
+
+      function projectMatchesSearch(project, searchTerm) {
+        if (!searchTerm) {
+          return true;
+        }
+
+        const haystack = [project.name, project.owner, project.recentActivity]
+          .join(" ")
+          .toLowerCase();
+
+        return haystack.includes(searchTerm);
+      }
+
+      function getFilteredProjects() {
+        const search = state.searchTerm;
+        const statusFilter = state.statusFilter;
+        const priorityFilter = state.priorityFilter;
+
+        return state.projects.filter(function (project) {
+          const matchesSearch = projectMatchesSearch(project, search);
+          const matchesStatus = statusFilter === "all" || project.status === statusFilter;
+          const matchesPriority =
+            priorityFilter === "all" || project.priority === priorityFilter;
+
+          return matchesSearch && matchesStatus && matchesPriority;
+        });
+      }
+
+      function renderProjectList() {
+        const container = document.getElementById("projects-container");
+        container.textContent = "";
+
+        if (state.loadError) {
+          updateSummaryText(0, 0);
+          setStateMessage({
+            kind: "state-error",
+            message: "Unable to load project data right now.",
+            showRetry: true,
+            isError: true
+          });
+          return;
+        }
+
+        if (state.projects.length === 0) {
+          updateSummaryText(0, 0);
+          setStateMessage({
+            kind: "state-empty-data",
+            message: "No project data available.",
+            showRetry: false,
+            isError: false
+          });
+          return;
+        }
+
+        const filteredProjects = getFilteredProjects();
+        updateSummaryText(filteredProjects.length, state.projects.length);
+
+        if (filteredProjects.length === 0) {
+          setStateMessage({
+            kind: "state-empty-results",
+            message: "No projects match your current filters.",
+            showRetry: false,
+            isError: false
+          });
+          return;
+        }
+
+        filteredProjects.forEach(function (project) {
+          container.appendChild(createProjectCard(project));
+        });
+      }
+
+      function setLoadingState(isLoading) {
+        const container = document.getElementById("projects-container");
+        container.setAttribute("aria-busy", isLoading ? "true" : "false");
+        if (isLoading) {
+          updateSummaryText(0, 0);
+          setStateMessage({
+            kind: "state-loading",
+            message: "Loading project data...",
+            showRetry: false,
+            isError: false
+          });
+        }
+      }
+
+      function bindControls() {
+        const searchInput = document.getElementById("project-search");
+        const statusFilter = document.getElementById("status-filter");
+        const priorityFilter = document.getElementById("priority-filter");
+        const resetButton = document.getElementById("reset-filters");
+
+        searchInput.addEventListener("input", function () {
+          state.searchTerm = searchInput.value.trim().toLowerCase();
+          renderProjectList();
+        });
+
+        statusFilter.addEventListener("change", function () {
+          state.statusFilter = statusFilter.value;
+          renderProjectList();
+        });
+
+        priorityFilter.addEventListener("change", function () {
+          state.priorityFilter = priorityFilter.value;
+          renderProjectList();
+        });
+
+        resetButton.addEventListener("click", function () {
+          searchInput.value = "";
+          statusFilter.value = "all";
+          priorityFilter.value = "all";
+          state.searchTerm = "";
+          state.statusFilter = "all";
+          state.priorityFilter = "all";
+          renderProjectList();
+          searchInput.focus();
+        });
+      }
+
+      async function loadProjects() {
+        setLoadingState(true);
 
         try {
           const response = await fetch("project-data.json", { cache: "no-store" });
@@ -126,31 +373,21 @@
           }
 
           const data = await response.json();
-          const projects = Array.isArray(data.projects) ? data.projects : [];
+          const projects = Array.isArray(data && data.projects) ? data.projects : [];
 
-          if (projects.length === 0) {
-            const emptyMessage = document.createElement("p");
-            emptyMessage.className = "value";
-            emptyMessage.textContent = "No project data available.";
-            container.appendChild(emptyMessage);
-            container.setAttribute("aria-busy", "false");
-            return;
-          }
-
-          projects.forEach(function (project) {
-            container.appendChild(createProjectCard(project));
-          });
+          state.projects = projects.map(normalizeProject);
+          state.loadError = false;
         } catch (error) {
-          const errorMessage = document.createElement("p");
-          errorMessage.className = "value";
-          errorMessage.textContent = "Unable to load project data right now.";
-          container.appendChild(errorMessage);
+          state.projects = [];
+          state.loadError = true;
         } finally {
-          container.setAttribute("aria-busy", "false");
+          setLoadingState(false);
+          renderProjectList();
         }
       }
 
-      renderProjects();
+      bindControls();
+      loadProjects();
     </script>
   </body>
 </html>
