@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Project Pulse</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="dashboard" role="main" aria-labelledby="dashboard-title">
+      <header class="dashboard-header">
+        <div>
+          <h1 id="dashboard-title" class="dashboard-title">Project Pulse</h1>
+          <p class="dashboard-subtitle">Live snapshot of team project health and momentum.</p>
+        </div>
+      </header>
+
+      <section aria-labelledby="projects-heading">
+        <h2 id="projects-heading" class="label">Projects</h2>
+        <div id="projects-container" class="projects-grid" role="list" aria-live="polite" aria-busy="true"></div>
+      </section>
+    </main>
+
+    <noscript>
+      <p class="dashboard-subtitle">Enable JavaScript to view project data.</p>
+    </noscript>
+
+    <script>
+      const STATUS_CLASS_MAP = {
+        "on track": "on-track",
+        "at risk": "at-risk",
+        "off track": "off-track"
+      };
+
+      const PRIORITY_CLASS_MAP = {
+        high: "high",
+        medium: "medium",
+        low: "low"
+      };
+
+      function toDisplayText(value, fallback) {
+        if (typeof value !== "string") {
+          return fallback;
+        }
+
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : fallback;
+      }
+
+      function normalizeToken(value) {
+        return toDisplayText(value, "Unknown")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, " ")
+          .trim();
+      }
+
+      function createBadge(kind, value) {
+        const displayValue = toDisplayText(value, "Unknown");
+        const token = normalizeToken(displayValue);
+        const badge = document.createElement("span");
+
+        badge.classList.add("badge");
+        badge.textContent = displayValue;
+
+        if (kind === "status") {
+          const normalized = STATUS_CLASS_MAP[token];
+          if (normalized) {
+            badge.classList.add("status", "status--" + normalized);
+          }
+          badge.setAttribute("aria-label", "Status: " + displayValue);
+        }
+
+        if (kind === "priority") {
+          const normalized = PRIORITY_CLASS_MAP[token];
+          if (normalized) {
+            badge.classList.add("priority", "priority--" + normalized);
+          }
+          badge.setAttribute("aria-label", "Priority: " + displayValue);
+        }
+
+        return badge;
+      }
+
+      function createProjectCard(project) {
+        const card = document.createElement("article");
+        card.className = "project-card";
+        card.setAttribute("role", "listitem");
+
+        const name = document.createElement("h3");
+        name.className = "project-card-title";
+        name.textContent = toDisplayText(project.name, "Untitled Project");
+
+        const meta = document.createElement("div");
+        meta.className = "project-card-meta";
+
+        const owner = document.createElement("p");
+        owner.className = "value";
+        owner.textContent = "Owner: " + toDisplayText(project.owner, "Unassigned");
+
+        const recentActivity = document.createElement("p");
+        recentActivity.className = "recent-activity";
+        recentActivity.textContent =
+          "Recent Activity: " +
+          toDisplayText(project.recentActivity, "No recent activity reported.");
+
+        meta.appendChild(createBadge("status", project.status));
+        meta.appendChild(createBadge("priority", project.priority));
+
+        card.appendChild(name);
+        card.appendChild(meta);
+        card.appendChild(owner);
+        card.appendChild(recentActivity);
+
+        return card;
+      }
+
+      async function renderProjects() {
+        const container = document.getElementById("projects-container");
+        container.textContent = "";
+        container.setAttribute("aria-busy", "true");
+
+        try {
+          const response = await fetch("project-data.json", { cache: "no-store" });
+          if (!response.ok) {
+            throw new Error("Failed to load project data");
+          }
+
+          const data = await response.json();
+          const projects = Array.isArray(data.projects) ? data.projects : [];
+
+          if (projects.length === 0) {
+            const emptyMessage = document.createElement("p");
+            emptyMessage.className = "value";
+            emptyMessage.textContent = "No project data available.";
+            container.appendChild(emptyMessage);
+            container.setAttribute("aria-busy", "false");
+            return;
+          }
+
+          projects.forEach(function (project) {
+            container.appendChild(createProjectCard(project));
+          });
+        } catch (error) {
+          const errorMessage = document.createElement("p");
+          errorMessage.className = "value";
+          errorMessage.textContent = "Unable to load project data right now.";
+          container.appendChild(errorMessage);
+        } finally {
+          container.setAttribute("aria-busy", "false");
+        }
+      }
+
+      renderProjects();
+    </script>
+  </body>
+</html>

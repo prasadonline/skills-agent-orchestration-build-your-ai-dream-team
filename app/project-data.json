@@ -1,0 +1,25 @@
+{
+  "projects": [
+    {
+      "name": "Onboarding Assistant",
+      "owner": "Avery",
+      "status": "On Track",
+      "recentActivity": "Completed user interview synthesis and updated backlog priorities.",
+      "priority": "High"
+    },
+    {
+      "name": "Billing API Upgrade",
+      "owner": "Mina",
+      "status": "At Risk",
+      "recentActivity": "Discovered compatibility issue in staging; mitigation plan in progress.",
+      "priority": "Critical"
+    },
+    {
+      "name": "Mobile Navigation Refresh",
+      "owner": "Noah",
+      "status": "Needs Review",
+      "recentActivity": "Submitted final interaction prototype for accessibility review.",
+      "priority": "Medium"
+    }
+  ]
+}
